@@ -3,3 +3,5 @@ data/*
 .cursorignore
 
 prompt/*
+
+__pycache__
