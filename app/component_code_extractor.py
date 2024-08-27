@@ -43,31 +43,32 @@ def get_filename_from_url(url):
 def file_exists(output_dir, filename):
     return (output_dir / filename).is_file()
 
-def process_component(driver, component, output_dir):
-    filename = get_filename_from_url(component['href'])
-    if file_exists(output_dir, filename):
-        print(f"Skipping {filename} - already exists")
-        return component['href']
-    
-    code = extract_code_snippet(driver, component['href'])
-    if code:
-        with open(output_dir / filename, 'w', encoding='utf-8') as f:
-            f.write(code)
-    return component['href']
-
-def process_components(components, num_workers):
-    firefox_options = Options()
-    firefox_options.add_argument("--headless")
-
-    driver = webdriver.Firefox(options=firefox_options)
-
+def process_component(component, output_dir):
+    driver = create_driver()
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [executor.submit(process_component, driver, component, DATA_DIR / 'code_snippets') for component in components]
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(components), desc="Processing components"):
-                future.result()
+        filename = get_filename_from_url(component['href'])
+        if file_exists(output_dir, filename):
+            print(f"Skipping {filename} - already exists")
+            return component['href']
+        
+        code = extract_code_snippet(driver, component['href'])
+        if code:
+            with open(output_dir / filename, 'w', encoding='utf-8') as f:
+                f.write(code)
+        return component['href']
     finally:
         driver.quit()
+
+def create_driver():
+    firefox_options = Options()
+    firefox_options.add_argument("--headless")
+    return webdriver.Firefox(options=firefox_options)
+
+def process_components(components, num_workers):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = [executor.submit(process_component, component, DATA_DIR / 'code_snippets') for component in components]
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(components), desc="Processing components"):
+            future.result()
 
 def main():
     # Set up argument parser
