@@ -5,21 +5,15 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from tqdm import tqdm
-import re
 import os
 from bs4 import BeautifulSoup
 import argparse
 import concurrent.futures
 import urllib.parse
 
-def extract_code_snippet(url):
-    # Set up Firefox options for headless mode
-    firefox_options = Options()
-    firefox_options.add_argument("--headless")
+from config import DATA_DIR
 
-    # Initialize the WebDriver
-    driver = webdriver.Firefox(options=firefox_options)
-
+def extract_code_snippet(driver, url):
     try:
         driver.get(url)
         code_element = WebDriverWait(driver, 10).until(
@@ -40,21 +34,40 @@ def extract_code_snippet(url):
     except Exception as e:
         print(f"Error processing {url}: {str(e)}")
         return None
-    finally:
-        driver.quit()
 
 def get_filename_from_url(url):
     path = urllib.parse.urlparse(url).path
     component_name = path.split('/')[-1]
     return f"{component_name}.tsx"
 
-def process_component(component):
-    code = extract_code_snippet(component['href'])
+def file_exists(output_dir, filename):
+    return (output_dir / filename).is_file()
+
+def process_component(driver, component, output_dir):
+    filename = get_filename_from_url(component['href'])
+    if file_exists(output_dir, filename):
+        print(f"Skipping {filename} - already exists")
+        return component['href']
+    
+    code = extract_code_snippet(driver, component['href'])
     if code:
-        filename = get_filename_from_url(component['href'])
-        with open(os.path.join('code_snippets', filename), 'w', encoding='utf-8') as f:
+        with open(output_dir / filename, 'w', encoding='utf-8') as f:
             f.write(code)
     return component['href']
+
+def process_components(components, num_workers):
+    firefox_options = Options()
+    firefox_options.add_argument("--headless")
+
+    driver = webdriver.Firefox(options=firefox_options)
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = [executor.submit(process_component, driver, component, DATA_DIR / 'code_snippets') for component in components]
+            for future in tqdm(concurrent.futures.as_completed(futures), total=len(components), desc="Processing components"):
+                future.result()
+    finally:
+        driver.quit()
 
 def main():
     # Set up argument parser
@@ -66,23 +79,23 @@ def main():
     args = parser.parse_args()
 
     # Load component links from JSON file
-    with open('element_data.json', 'r') as f:
+    with open(DATA_DIR / 'element_data.json', 'r') as f:
         components = json.load(f)
 
     # Use the command-line argument for num_links
     num_links = args.num_links if args.num_links > 0 else len(components)
     num_links = min(num_links, len(components))
 
+    # Slice the components list based on num_links
+    components_to_process = components[:num_links]
+
     # Create a directory to store code snippets
-    os.makedirs('code_snippets', exist_ok=True)
+    os.makedirs(DATA_DIR / 'code_snippets', exist_ok=True)
 
-    # Process links and extract code snippets in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = [executor.submit(process_component, component) for component in components[:num_links]]
-        for future in tqdm(concurrent.futures.as_completed(futures), total=num_links, desc="Processing components"):
-            future.result()
+    # Call the new function
+    process_components(components_to_process, args.workers)
 
-    print(f"Processed {num_links} components. Code snippets saved in 'code_snippets' directory.")
+    print(f"Processed {len(components_to_process)} components. Code snippets saved in 'code_snippets' directory.")
 
 if __name__ == "__main__":
     main()
