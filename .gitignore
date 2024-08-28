@@ -5,3 +5,5 @@ data/*
 prompt/*
 
 __pycache__
+
+.env
